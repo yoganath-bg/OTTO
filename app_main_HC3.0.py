@@ -33,7 +33,7 @@ exploration_page = st.Page(
 )
 
 calculation_page = st.Page(
-                page = "views_HC3.0/calculation_section_test.py",
+                page = "views_HC3.0/calculation_section_bundle_ret.py",
                 title = "Calculate",
                 icon = ":material/calculate:",
 )

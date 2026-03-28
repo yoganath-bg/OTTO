@@ -4,3 +4,6 @@ streamlit
 openpyxl
 seaborn
 plotly-express
+scikit-learn==1.1.1
+lightgbm==4.1.0
+joblib

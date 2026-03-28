@@ -236,7 +236,7 @@ with col2:
         end_date = st.date_input("Select Renewal End Date", value=date(2024, 11, 30))
 
     # --- Step 2: Read SQL template ---
-    with open("views_HC3.0\HC_3.0_data_input.sql", "r") as f:
+    with open("views_HC3.0/HC_3.0_data_input.sql", "r") as f:
         sql_template = f.read()
 
 
