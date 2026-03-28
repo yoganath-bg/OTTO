@@ -1210,7 +1210,7 @@ import joblib
 import numpy as np
 
 # Load model
-model = joblib.load("views_HC3.0/model.pkl")
+model = joblib.load("views_HC3.0/model_compressed.joblib")
 
 # Feature engineering
 df_feat = engineer_features_for_scoring(df_for_model)
