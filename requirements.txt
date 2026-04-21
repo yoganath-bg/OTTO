@@ -1,0 +1,8 @@
+pandas
+numpy
+streamlit
+openpyxl
+seaborn
+plotly
+mlflow
+databricks-sdk
