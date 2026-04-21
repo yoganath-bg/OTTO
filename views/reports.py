@@ -107,6 +107,85 @@ def _dual_line_chart(grp, x_col, x_label, fp_label, prem_label, height):
     return fig
 
 
+# ── YoY bucket helpers ────────────────────────────────────────────────────────
+BUCKET_ORDER = [
+    "< -15%",
+    "= -15%",
+    "-15% to 0%",
+    "0% (No Change)",
+    "0% to 15%",
+    "= +15%",
+    "> +15%",
+]
+
+BUCKET_COLORS = {
+    "< -15%":         "#d62728",
+    "= -15%":         "#ff7f0e",
+    "-15% to 0%":     "#FFCC80",
+    "0% (No Change)": "#aec7e8",
+    "0% to 15%":      "#98df8a",
+    "= +15%":         "#2ca02c",
+    "> +15%":         "#006400",
+}
+
+
+def _assign_bucket(series):
+    """Assign a YoY% series (values in %) to the 7 ordered cap/collar buckets."""
+    eps = 1e-6
+    out = pd.Series("", index=series.index, dtype="object")
+    out[series < -15 - eps]                                = "< -15%"
+    out[(series >= -15 - eps) & (series <= -15 + eps)]     = "= -15%"
+    out[(series >  -15 + eps) & (series <    -eps)]        = "-15% to 0%"
+    out[(series >=   -eps)    & (series <=    eps)]        = "0% (No Change)"
+    out[(series >     eps)    & (series <  15 - eps)]      = "0% to 15%"
+    out[(series >= 15 - eps)  & (series <= 15 + eps)]      = "= +15%"
+    out[series >  15 + eps]                                = "> +15%"
+    return out
+
+
+def _stacked_yoy_chart(df, fp_col, ly_col, group_col, height):
+    """100% stacked bar chart of YoY% cap/collar buckets grouped by group_col."""
+    valid = df[[fp_col, ly_col, group_col]].copy()
+    valid[fp_col] = pd.to_numeric(valid[fp_col], errors='coerce')
+    valid[ly_col] = pd.to_numeric(valid[ly_col], errors='coerce')
+    valid = valid.dropna()
+    valid = valid[valid[ly_col] != 0]
+    if valid.empty:
+        return None
+    yoy_pct = ((valid[fp_col] / valid[ly_col]) - 1) * 100
+    valid = valid.copy()
+    valid['bucket'] = _assign_bucket(yoy_pct)
+    grp = (valid.groupby([group_col, 'bucket'], observed=True)
+                .size().reset_index(name='count'))
+    # Compute group totals and normalise to percentages
+    totals = grp.groupby(group_col, observed=True)['count'].transform('sum')
+    grp['pct'] = grp['count'] / totals * 100
+    fig = go.Figure()
+    for b in BUCKET_ORDER:
+        sub = grp[grp['bucket'] == b]
+        if sub.empty:
+            continue
+        fig.add_trace(go.Bar(
+            x=sub[group_col].astype(str),
+            y=sub['pct'],
+            name=b,
+            marker_color=BUCKET_COLORS[b],
+            customdata=sub['count'],
+            hovertemplate="%{y:.1f}%<br>Count: %{customdata}<extra>%{fullData.name}</extra>",
+        ))
+    fig.update_layout(
+        barmode='stack',
+        xaxis_title=group_col,
+        yaxis_title="% of Policies",
+        yaxis=dict(ticksuffix="%", range=[0, 100]),
+        height=height,
+        margin=dict(t=10, b=80),
+        legend=dict(orientation="h", y=1.12),
+        xaxis=dict(tickangle=-45),
+    )
+    return fig
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 tab_product, tab_customer = st.tabs(["Product", "Customer"])
 
@@ -214,6 +293,53 @@ with tab_product:
 
             fig4 = _dual_line_chart(grp, x_col, x_label, "Avg Final Premium (£)", "Avg Final Premium", CHART_H + 40)
             st.plotly_chart(fig4, use_container_width=True)
+
+    st.markdown("""<hr style="border: 0.5px solid #ccc; margin:12px 0;">""", unsafe_allow_html=True)
+
+    prod_c5, prod_c6 = st.columns(2)
+
+    with prod_c5:
+        st.markdown("##### YoY Price Movement by Pricing Key")
+        if not ly_options_avail:
+            st.info("LY price columns not found — cannot compute YoY% buckets.")
+        elif pk_col not in df.columns:
+            st.info("pricing_key column not found in data.")
+        else:
+            stk_denom = st.radio(
+                "Denominator for YoY buckets",
+                ly_options_avail,
+                horizontal=True,
+                key="rep_prod_stk_denom",
+            )
+            stk_fig = _stacked_yoy_chart(df, fp_col, stk_denom, pk_col, CHART_H + 40)
+            if stk_fig:
+                st.plotly_chart(stk_fig, use_container_width=True)
+            else:
+                st.info("No valid data for stacked YoY chart.")
+
+    with prod_c6:
+        st.markdown("##### Final Premium / Discounted Premium Ratio")
+        disc_col = _col(df, 'discounted_premium')
+        if disc_col is None:
+            st.info("discounted_premium column not found in scored data.")
+        else:
+            ratio_series = (
+                pd.to_numeric(df[fp_col],   errors='coerce') /
+                pd.to_numeric(df[disc_col], errors='coerce')
+            ).replace([np.inf, -np.inf], pd.NA).dropna()
+            if not ratio_series.empty:
+                rlo, rhi, rbk = _clip_inputs(ratio_series, "rep_prod_ratio")
+                rfig = go.Figure(_hist(ratio_series, rlo, rhi, rbk, "FP / Disc Premium", '#0f2067'))
+                rfig.update_layout(
+                    xaxis_title="Final Premium / Discounted Premium",
+                    yaxis_title="Count",
+                    bargap=0.05,
+                    height=CHART_H,
+                    margin=dict(t=10, b=40),
+                )
+                st.plotly_chart(rfig, use_container_width=True)
+            else:
+                st.info("No valid ratio data to display.")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -336,4 +462,44 @@ with tab_customer:
                 cfig4 = _dual_line_chart(cgrp, cx_col, cx_label, "Avg Bundle Premium (£)", "Avg Bundle Premium", CHART_H + 40)
                 st.plotly_chart(cfig4, use_container_width=True)
 
+        st.markdown("""<hr style="border: 0.5px solid #ccc; margin:12px 0;">""", unsafe_allow_html=True)
 
+        cust_c5, cust_c6 = st.columns(2)
+
+        with cust_c5:
+            st.markdown("##### YoY Price Movement by Pricing Key")
+            cpk_col_stk = _col(cdf, 'pricing_key')
+            cgroup_col_stk = cpk_col_stk if (cpk_col_stk and cpk_col_stk in cdf.columns) else pb_col
+            if not cly_options:
+                st.info("Bundle LY price column not found — cannot compute YoY% buckets.")
+            else:
+                cstk_denom = cly_options[0]
+                cstk_fig = _stacked_yoy_chart(cdf, bfp_col, cstk_denom, cgroup_col_stk, CHART_H + 40)
+                if cstk_fig:
+                    st.plotly_chart(cstk_fig, use_container_width=True)
+                else:
+                    st.info("No valid data for stacked YoY chart.")
+
+        with cust_c6:
+            st.markdown("##### Bundle Final Premium / Bundle Discounted Premium Ratio")
+            bdisc_col = _col(cdf, 'bundle_discounted_premium')
+            if bdisc_col is None:
+                st.info("bundle_discounted_premium column not found in scored data.")
+            else:
+                bratio_series = (
+                    pd.to_numeric(cdf[bfp_col],   errors='coerce') /
+                    pd.to_numeric(cdf[bdisc_col], errors='coerce')
+                ).replace([np.inf, -np.inf], pd.NA).dropna()
+                if not bratio_series.empty:
+                    brlo, brhi, brbk = _clip_inputs(bratio_series, "rep_cust_ratio")
+                    brfig = go.Figure(_hist(bratio_series, brlo, brhi, brbk, "Bundle FP / Disc Premium", '#0f2067'))
+                    brfig.update_layout(
+                        xaxis_title="Bundle Final Premium / Bundle Discounted Premium",
+                        yaxis_title="Count",
+                        bargap=0.05,
+                        height=CHART_H,
+                        margin=dict(t=10, b=40),
+                    )
+                    st.plotly_chart(brfig, use_container_width=True)
+                else:
+                    st.info("No valid ratio data to display.")

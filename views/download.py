@@ -76,27 +76,15 @@ file_labels = [
 "Flat_Bundle_Margin"
 ]
 
-col1, col2 = st.columns(2)
-with col1:
-    st.write("Click below to download the pricing file")
+table_name = st.selectbox("Choose SAP table to download in transformed format", options=file_labels)
+if table_name is not None:
+    df = st.session_state.processed_data[table_name]
     st.download_button(
-    label="Download final premium file",
-    data=premium_file.to_csv(index=False),
-    file_name="premium_file.csv",
-    mime="text/csv"
-)
-
-
-with col2:
-    table_name = st.selectbox("Choose SAP table to download in transformed format", options=file_labels)
-    if table_name is not None:
-            df = st.session_state.processed_data[table_name]
-            st.download_button(
-            label=f"Download {table_name} file",
-            data=df.to_csv(index=False),
-            file_name=f"{table_name}.csv",
-            mime="text/csv"
-            )
+        label=f"Download {table_name} file",
+        data=df.to_csv(index=False),
+        file_name=f"{table_name}.csv",
+        mime="text/csv"
+    )
 
 # ---------- Scored downloads ----------
 section_divider()
@@ -168,7 +156,7 @@ def _get_username() -> str:
     except Exception:
         return user_id or "Unknown"
 
-if st.button("Generate Run Summary (Word)", type="primary"):
+if "run_summary_docx" not in st.session_state:
     with st.spinner("Building report…"):
         try:
             username = _get_username()
@@ -180,14 +168,20 @@ if st.button("Generate Run Summary (Word)", type="primary"):
                 prepared_by      = username,
                 prepared_at      = datetime.now(),
             )
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            st.download_button(
-                label     = "⬇ Download Run Summary (.docx)",
-                data      = docx_bytes,
-                file_name = f"OTTO_Run_Summary_{ts}.docx",
-                mime      = "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            )
+            st.session_state["run_summary_docx"] = {
+                "bytes": docx_bytes,
+                "ts": datetime.now().strftime("%Y%m%d_%H%M%S"),
+            }
         except ImportError as e:
             st.error(f"Report generator import error: {e}")
         except Exception as e:
             st.error(f"Failed to generate report: {e}")
+
+if "run_summary_docx" in st.session_state:
+    ts = st.session_state["run_summary_docx"]["ts"]
+    st.download_button(
+        label     = "⬇ Download Run Summary (.docx)",
+        data      = st.session_state["run_summary_docx"]["bytes"],
+        file_name = f"OTTO_Run_Summary_{ts}.docx",
+        mime      = "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
