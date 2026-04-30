@@ -176,3 +176,177 @@ def calculate_prices(
     )
 
     return input_risk
+
+
+# ---------------------------------------------------------------------------
+# Future Projections
+# ---------------------------------------------------------------------------
+
+_FACTOR_COLS = [
+    "f_expense", "f_base_price", "f_boiler_type", "f_manufacturer",
+    "f_postal_sector", "f_radiators", "f_boiler_age", "f_asv_price",
+    "f_tenure_discount", "f_cap", "f_collar", "f_min", "f_max",
+    "c_Risk_Premium", "c_ASV_Premium", "c_Undiscounted_Premium",
+    "c_tenure_discount", "Discounted_Premium", "Min_Premium",
+    "Max_Premium", "Capped_Premium", "Final_Premium",
+]
+
+
+def calculate_future_projections(
+    input_risk_base,
+    constraints_df,
+    boiler_type_df,
+    manufacturer_df,
+    postal_sector_df,
+    radiators_df,
+    boiler_age_df,
+    tenure_discount_df,
+    inflation_df,
+    asv_future_df,
+):
+    """Calculate projected Final_Premium for Years 1–5.
+
+    Parameters
+    ----------
+    input_risk_base : DataFrame
+        Clean pre-calculation input risk (no factor columns).
+    constraints_df : DataFrame
+        Y1 constraints keyed on (pricing_key, bundle).
+    inflation_df : DataFrame
+        Columns: pricing_key, Y2_pct, Y3_pct, Y4_pct, Y5_pct.
+        Each Yn_pct is the compound increment applied *on top of* the
+        previous year's base (i.e. Y3 base = Y2 base × (1 + Y3_pct/100)).
+    asv_future_df : DataFrame
+        Columns: pricing_key, ASV_Y1, ASV_Y2, ASV_Y3, ASV_Y4, ASV_Y5.
+
+    Returns
+    -------
+    DataFrame with columns:
+        pricing_key, bundle, [key identifiers],
+        boiler_age_1..5, tenure_1..5,
+        Final_Premium_Y1..Y5
+    """
+    # Determine caps for boiler_age and tenure from their lookup tables
+    max_boiler_age = (
+        int(boiler_age_df["boiler_age"].max())
+        if boiler_age_df is not None and not boiler_age_df.empty
+        else 99
+    )
+    max_tenure = (
+        int(tenure_discount_df["tenure"].max())
+        if tenure_discount_df is not None and not tenure_discount_df.empty
+        else 99
+    )
+
+    # Base age/tenure series
+    base_boiler_age = (
+        pd.to_numeric(input_risk_base["boiler_age"], errors="coerce")
+        if "boiler_age" in input_risk_base.columns
+        else None
+    )
+    base_tenure = (
+        pd.to_numeric(input_risk_base["tenure_for_discount"], errors="coerce")
+        if "tenure_for_discount" in input_risk_base.columns
+        else None
+    )
+
+    # Start result DataFrame with identifier columns
+    id_cols = ["pricing_key", "bundle"] + [
+        c for c in ["business_agreement", "contract_id", "contract_start_date"]
+        if c in input_risk_base.columns
+    ]
+    result = input_risk_base[[c for c in id_cols if c in input_risk_base.columns]].copy()
+
+    # Build per-pricing_key compound multiplier lookup from inflation_df
+    # inflation_df row: pricing_key, Y2_pct, Y3_pct, Y4_pct, Y5_pct
+    infl = inflation_df.set_index("pricing_key") if inflation_df is not None else pd.DataFrame()
+
+    # Rolling ly_undiscounted_price: starts from input data, then each year
+    # is replaced by the previous year's Final_Premium (for cap/collar calculation).
+    rolling_ly_undiscounted = (
+        pd.to_numeric(input_risk_base["ly_undiscounted_price"], errors="coerce").values.copy()
+        if "ly_undiscounted_price" in input_risk_base.columns
+        else None
+    )
+
+    for y in range(1, 6):
+        age_offset = y - 1
+
+        # ── boiler_age and tenure for this year ──────────────────────────
+        if base_boiler_age is not None:
+            boiler_age_y = (base_boiler_age + age_offset).clip(upper=max_boiler_age)
+        else:
+            boiler_age_y = pd.Series([pd.NA] * len(input_risk_base))
+
+        if base_tenure is not None:
+            tenure_y = (base_tenure + age_offset).clip(upper=max_tenure)
+        else:
+            tenure_y = pd.Series([pd.NA] * len(input_risk_base))
+
+        result[f"boiler_age_{y}"] = boiler_age_y.values
+        result[f"tenure_{y}"] = tenure_y.values
+
+        # ── Compound inflation multiplier per pricing_key ─────────────────
+        # Multiplier for year y = Π(1 + Yk_pct/100) for k = 2..y
+        c_mod = constraints_df.copy()
+        if y > 1 and not infl.empty:
+            def _multiplier(pk):
+                m = 1.0
+                for k in range(2, y + 1):
+                    col = f"Y{k}_pct"
+                    pct = float(infl.at[pk, col]) if pk in infl.index and col in infl.columns else 0.0
+                    m *= 1.0 + pct / 100.0
+                return m
+
+            mult_series = c_mod["pricing_key"].map(_multiplier).fillna(1.0)
+            for col in ["f_base_price", "f_min", "f_max"]:
+                if col in c_mod.columns:
+                    c_mod[col] = c_mod[col] * mult_series
+
+        # ── Override f_asv_price from asv_future_df ───────────────────────
+        asv_col = f"ASV_Y{y}"
+        if asv_future_df is not None and asv_col in asv_future_df.columns:
+            asv_map = (
+                asv_future_df[["pricing_key", asv_col]]
+                .drop_duplicates("pricing_key")
+                .set_index("pricing_key")[asv_col]
+                .to_dict()
+            )
+            if "f_asv_price" in c_mod.columns:
+                c_mod["f_asv_price"] = c_mod["pricing_key"].map(asv_map).fillna(c_mod["f_asv_price"])
+            else:
+                c_mod["f_asv_price"] = c_mod["pricing_key"].map(asv_map).fillna(0.0)
+            c_mod["f_asv_price"] = pd.to_numeric(c_mod["f_asv_price"], errors="coerce").fillna(0.0)
+
+        # ── Build modified input_risk copy for this year ──────────────────
+        ir_mod = input_risk_base.copy()
+        # Drop any pre-existing factor columns to avoid merge conflicts
+        ir_mod = ir_mod.drop(columns=[c for c in _FACTOR_COLS if c in ir_mod.columns])
+
+        if base_boiler_age is not None:
+            ir_mod["boiler_age"] = boiler_age_y.values
+        if base_tenure is not None:
+            ir_mod["tenure_for_discount"] = tenure_y.values
+
+        # Feed previous year's Final_Premium as ly_undiscounted_price (Y1 uses original)
+        if rolling_ly_undiscounted is not None:
+            ir_mod["ly_undiscounted_price"] = rolling_ly_undiscounted
+
+        # ── Run pricing ───────────────────────────────────────────────────
+        _pf = calculate_prices(
+            ir_mod,
+            c_mod,
+            boiler_type_df,
+            manufacturer_df,
+            postal_sector_df,
+            radiators_df,
+            boiler_age_df,
+            tenure_discount_df,
+        )
+
+        result[f"Final_Premium_Y{y}"] = _pf["Final_Premium"].values
+
+        # Roll forward: this year's Final_Premium becomes next year's ly_undiscounted_price
+        rolling_ly_undiscounted = _pf["Final_Premium"].values.copy()
+
+    return result

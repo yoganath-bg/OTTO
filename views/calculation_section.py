@@ -188,8 +188,19 @@ if st.button('Calculate Prices', type='primary'):
 
         with st.spinner('Calculating prices…'):
             try:
+                # Store clean pre-calculation copies for Future Projections
+                st.session_state['input_risk_clean'] = _src.copy()
+                st.session_state['projection_constraints'] = _cdf.copy()
+                st.session_state['_proj_boiler_type_df']    = globals().get('boiler_type_df')
+                st.session_state['_proj_manufacturer_df']   = globals().get('manufacturer_df')
+                st.session_state['_proj_postal_sector_df']  = globals().get('postal_sector_df')
+                st.session_state['_proj_radiators_df']      = globals().get('radiators_df')
+                st.session_state['_proj_boiler_age_df']     = globals().get('boiler_age_df')
+                st.session_state['_proj_tenure_discount_df'] = globals().get('tenure_discount_df')
+                st.session_state.pop('future_projections', None)
+
                 _pf = calculate_prices(
-                    _src,
+                    _src.copy(),
                     _cdf,
                     globals().get('boiler_type_df'),
                     globals().get('manufacturer_df'),

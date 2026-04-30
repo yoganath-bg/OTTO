@@ -67,6 +67,12 @@ ask_page = st.Page(
                 icon = ":material/smart_toy:",
 )
 
+future_projections_page = st.Page(
+                page = "views/future_projections.py",
+                title = "Future Projections",
+                icon = ":material/trending_up:",
+)
+
 
 # -- NAVIGATION SETUP --
 
@@ -75,7 +81,7 @@ pg = st.navigation(
         "Info" : [about_page],
         "Upload": [upload_page],
         "Calculate" : [calculation_page, retention_page],
-        "Explore": [exploration_page, reports_page, ask_page],
+        "Explore": [exploration_page, reports_page, ask_page, future_projections_page],
         "Download": [download_page]
     }
 )
