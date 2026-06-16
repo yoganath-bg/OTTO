@@ -216,6 +216,7 @@ if st.button('Calculate Prices', type='primary'):
                 st.session_state.pop('retention_summary', None)
                 st.session_state.pop('premium_scored', None)
                 st.session_state.pop('contracts_view_scored', None)
+                st.session_state.pop('sap_upload_bytes', None)
                 st.success(f"Prices calculated successfully for {len(_pf):,} policies!")
             except Exception as _e:
                 st.error(f"Error calculating prices: {_e}")

@@ -503,3 +503,5 @@ with tab_customer:
                     st.plotly_chart(brfig, use_container_width=True)
                 else:
                     st.info("No valid ratio data to display.")
+
+

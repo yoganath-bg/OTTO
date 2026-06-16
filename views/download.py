@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import io
 from datetime import datetime
 
 from utils.theme import page_header, section_divider, section_heading
@@ -93,7 +94,7 @@ section_heading("Download Scored Data")
 if premium_scored is None:
     st.info("Run **Get Retention** on the Calculate page to enable scored downloads.")
 else:
-    dl1, dl2 = st.columns(2)
+    dl1, dl2, dl3 = st.columns(3)
     with dl1:
         st.caption(f"Product file — {len(premium_file_dl):,} rows (all policies, scores joined where available)")
         st.download_button(
@@ -113,6 +114,36 @@ else:
             )
         else:
             st.info("No contracts view available.")
+    with dl3:
+        if st.button("Generate SAP upload file", type="primary"):
+            with st.spinner("Building SAP upload file…"):
+                _sap = pd.DataFrame({
+                    "account_ref": premium_file_dl["business_agreement"],
+                    "Price_Date":  pd.to_datetime(premium_file_dl["renewal_Date"], errors="coerce").dt.strftime("%Y%m%d"),
+                    "Pricing_Key": premium_file_dl["pricing_key"],
+                    "Appliance":   "",
+                    "Price":       premium_file_dl["Final_Premium"].round(0).astype(int),
+                    "Price Type":  "F",
+                    "Code":        "",
+                    "Disc":        "",
+                    "Disc Type":   "",
+                    "File Name":   "",
+                })
+                _buf = io.BytesIO()
+                with pd.ExcelWriter(_buf, engine="openpyxl") as _w:
+                    _sap.to_excel(_w, index=False, sheet_name="SAP_Upload")
+                _buf.seek(0)
+                st.session_state['sap_upload_bytes'] = _buf.getvalue()
+                st.session_state['sap_upload_row_count'] = len(_sap)
+        sap_bytes = st.session_state.get('sap_upload_bytes')
+        if sap_bytes is not None:
+            st.caption(f"SAP upload file — {st.session_state['sap_upload_row_count']:,} rows, formatted for direct SAP ingestion")
+            st.download_button(
+                label="⬇ Download SAP upload file",
+                data=sap_bytes,
+                file_name="SAP_upload.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
 
 # ── Word Run Summary Report ───────────────────────────────────────────────────
 section_divider()
