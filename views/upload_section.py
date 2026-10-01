@@ -110,7 +110,7 @@ data_source = st.radio(
 )
 
 _HTTP_PATH  = "/sql/1.0/warehouses/60555e50c3fecff0"
-_TABLE_NAME = "dap_bgss_prd.ana_p_pricing.HC_renewals_model_input_test"
+_TABLE_NAME = "dap_bgss_prd.ana_p_pricing.HC_renewals_model_input"
 
 if data_source == "Fetch from Unity Catalog":
     # Default date range: previous calendar month
